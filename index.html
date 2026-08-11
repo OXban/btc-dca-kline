@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>BTC 定投日线</title>
+  <script src="https://unpkg.com/lightweight-charts@5.0.8/dist/lightweight-charts.standalone.production.js"></script>
+  <style>
+    :root { color-scheme: dark; --bg:#0b1020; --card:#131b31; --line:#263150; --text:#eff4ff; --muted:#9cabc9; --accent:#f6a623; --up:#2fc88e; --down:#f05c6c; }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family:ui-sans-serif,system-ui,"PingFang SC","Microsoft Yahei",sans-serif; color:var(--text); background:linear-gradient(135deg,#090d19,#111a33); }
+    main { max-width:1160px; padding:28px 18px 44px; margin:auto; }
+    h1 { font-size:28px; margin:0 0 7px; }
+    .sub { margin:0 0 22px; color:var(--muted); }
+    .panel { background:rgba(19,27,49,.94); border:1px solid var(--line); border-radius:16px; box-shadow:0 14px 38px #0003; }
+    .controls { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)) auto; gap:14px; padding:18px; margin-bottom:16px; align-items:end; }
+    label { display:grid; gap:7px; color:var(--muted); font-size:13px; }
+    input, select { width:100%; border:1px solid #344365; border-radius:9px; padding:11px 12px; background:#0c1326; color:var(--text); font:inherit; }
+    button { border:0; border-radius:9px; background:var(--accent); color:#181005; padding:12px 19px; font-weight:800; cursor:pointer; font-size:14px; }
+    button:hover { filter:brightness(1.08); }
+    .small-button { padding:11px 13px; white-space:nowrap; }
+    .hidden { display:none; }
+    .price-picker { grid-column:span 2; display:flex; flex-wrap:wrap; gap:8px; align-items:center; min-height:42px; }
+    .price-picker input { width:145px; }.price-tag { padding:7px 9px; border:1px solid #5d4820; background:#251d0e; color:#ffd784; border-radius:999px; font-size:13px; }
+    .price-tag button { padding:0 0 0 7px; color:#ffd784; background:transparent; font-size:15px; font-weight:400; }
+    #chart { height:530px; }
+    .chart-head { display:flex; justify-content:space-between; align-items:center; gap:10px; padding:17px 18px 4px; }
+    .chart-head strong { font-size:17px; }.status { color:var(--muted); font-size:13px; }
+    .summary { display:grid; grid-template-columns:repeat(4,1fr); margin-top:16px; overflow:hidden; }
+    .metric { padding:18px; border-right:1px solid var(--line); }.metric:last-child{border:0}
+    .metric span { color:var(--muted); font-size:13px; display:block; margin-bottom:7px; }.metric strong { font-size:20px; }
+    .profit { color:var(--up); }.loss { color:var(--down); }
+    .note { font-size:12px; line-height:1.7; color:var(--muted); margin:16px 4px 0; }
+    @media (max-width:700px) { .controls{grid-template-columns:1fr 1fr}.controls button{grid-column:1/-1}.summary{grid-template-columns:1fr 1fr}.metric:nth-child(2){border-right:0}.metric:nth-child(-n+2){border-bottom:1px solid var(--line)} #chart{height:420px} }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>₿ BTC 定投日线</h1>
+    <p class="sub">按北京时间（UTC+8）每日收盘价模拟定投；图中的 <b>B</b> 是每一笔买入。</p>
+    <section class="panel controls">
+      <label>每次定投金额（USDT）<input id="amount" type="number" min="1" step="1" value="100" /></label>
+      <label>开始日期（北京时间）<input id="start" type="date" /></label>
+      <label>结束日期（北京时间）<input id="end" type="date" /></label>
+      <label>定投方式<select id="mode"><option value="schedule" selected>按时间定投</option><option value="price">按价格定投</option></select></label>
+      <label id="frequency-wrap">定投频率<select id="frequency"><option value="daily">每天</option><option value="weekly" selected>每周</option><option value="monthly">每月</option></select></label>
+      <div id="target-wrap" class="price-picker hidden"><input id="target-price" aria-label="触发价格" type="number" min="1" step="1" placeholder="输入触发价格" /><button type="button" class="small-button" id="add-price">添加价格</button><div id="price-tags"></div></div>
+      <button id="calculate">更新定投计划</button>
+    </section>
+    <section class="panel">
+      <div class="chart-head"><strong>BTC/USDT · 日线</strong><span class="status" id="status">正在加载行情…</span></div>
+      <div id="chart"></div>
+    </section>
+    <section class="panel summary">
+      <div class="metric"><span>累计定投</span><strong id="invested">—</strong></div>
+      <div class="metric"><span>累计 BTC</span><strong id="btc">—</strong></div>
+      <div class="metric"><span>定投成本（平均买入价）</span><strong id="cost">—</strong></div>
+      <div class="metric"><span>收益金额 / 收益率</span><strong id="profit">—</strong></div>
+    </section>
+    <p class="note">“按价格定投”可设置多个价格档位。每个档位仅在开始至结束日期内、第一次出现北京时间日线收盘价低于或等于该档位时买入一次。数据来源：Binance 现货 BTCUSDT。日线以 API 的 <code>timeZone=8</code> 参数对齐 UTC+8；未包含交易手续费、滑点或税费。本页面仅供学习和记录，不构成投资建议。</p>
+  </main>
+  <script>
+    const $ = id => document.getElementById(id);
+    const fmtUsd = n => new Intl.NumberFormat('zh-CN',{style:'currency',currency:'USD',maximumFractionDigits:2}).format(n || 0);
+    const fmtBtc = n => (n || 0).toFixed(8) + ' BTC';
+    const nowCst = new Date(Date.now()+8*3600e3).toISOString().slice(0,10);
+    const defaultStart = new Date(Date.now()-365*864e5+8*3600e3).toISOString().slice(0,10);
+    $('start').value = defaultStart;
+    $('end').value = nowCst;
+
+    const chart = LightweightCharts.createChart($('chart'), {
+      autoSize:true, layout:{background:{color:'#131b31'},textColor:'#b8c4df'}, grid:{vertLines:{color:'#202a45'},horzLines:{color:'#202a45'}},
+      crosshair:{mode:LightweightCharts.CrosshairMode.Normal}, rightPriceScale:{borderColor:'#334365'}, timeScale:{borderColor:'#334365',timeVisible:false}
+    });
+    const candles = chart.addSeries(LightweightCharts.CandlestickSeries,{upColor:'#2fc88e',downColor:'#f05c6c',borderUpColor:'#2fc88e',borderDownColor:'#f05c6c',wickUpColor:'#2fc88e',wickDownColor:'#f05c6c'});
+    let candleData = [];
+    const buyMarkers = LightweightCharts.createSeriesMarkers(candles, []);
+    let priceLevels = [80000];
+
+    function cstDate(ts) { return new Date((ts + 8*3600)*1000).toISOString().slice(0,10); }
+    async function loadCandles() {
+      $('status').textContent = '正在更新日线…';
+      const url = 'https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1d&limit=1000&timeZone=8';
+      const res = await fetch(url);
+      if (!res.ok) throw new Error('行情服务暂时不可用');
+      const rows = await res.json();
+      candleData = rows.map(r => ({ time:cstDate(r[0]/1000), open:+r[1], high:+r[2], low:+r[3], close:+r[4] }));
+      candles.setData(candleData);
+      chart.timeScale().fitContent();
+      $('status').textContent = `已更新 · ${new Date().toLocaleTimeString('zh-CN',{timeZone:'Asia/Shanghai'})}（北京时间）`;
+    }
+    function isBuyDay(date, start, frequency) {
+      const days = Math.floor((Date.parse(date+'T00:00:00+08:00') - Date.parse(start+'T00:00:00+08:00')) / 864e5);
+      if (days < 0) return false;
+      if (frequency === 'daily') return true;
+      if (frequency === 'weekly') return days % 7 === 0;
+      const d = new Date(date+'T00:00:00+08:00'), s = new Date(start+'T00:00:00+08:00');
+      return d.getUTCDate() === s.getUTCDate() || (d.getUTCDate() < s.getUTCDate() && new Date(d.getTime()+864e5).getUTCMonth() !== d.getUTCMonth());
+    }
+    function calculate() {
+      const amount = Number($('amount').value), start = $('start').value, end = $('end').value, frequency = $('frequency').value, mode = $('mode').value;
+      if (!amount || amount <= 0 || !start || !end || start > end) return alert('请填写有效的金额、开始日期和结束日期。');
+      if (mode === 'price' && !priceLevels.length) return alert('请至少添加一个触发价格。');
+      let invested=0, acquired=0; const markers=[];
+      const windowCandles = candleData.filter(d => d.time >= start && d.time <= end);
+      if (mode === 'price') {
+        for (const level of priceLevels) {
+          const hit = windowCandles.find(d => d.close <= level);
+          if (!hit) continue;
+          invested += amount; acquired += amount / hit.close;
+          markers.push({time:hit.time,position:'belowBar',color:'#f6a623',shape:'arrowUp',text:'B'});
+        }
+      } else for (const d of windowCandles) if (isBuyDay(d.time,start,frequency)) {
+        invested += amount; acquired += amount / d.close;
+        markers.push({time:d.time,position:'belowBar',color:'#f6a623',shape:'arrowUp',text:'B'});
+      }
+      const markerCounts = new Map();
+      markers.forEach(marker => markerCounts.set(marker.time, (markerCounts.get(marker.time) || 0) + 1));
+      buyMarkers.setMarkers([...markerCounts].map(([time, count]) => ({time, position:'belowBar', color:'#f6a623', shape:'arrowUp', text:count > 1 ? `B×${count}` : 'B'})));
+      const price = candleData.at(-1)?.close || 0, value=acquired*price, pnl=value-invested, rate=invested ? pnl/invested*100 : 0;
+      $('invested').textContent=fmtUsd(invested); $('btc').textContent=fmtBtc(acquired); $('cost').textContent=acquired ? fmtUsd(invested/acquired) : '—';
+      const p=$('profit'); p.textContent=`${fmtUsd(pnl)} / ${rate.toFixed(2)}%`; p.className=pnl >= 0 ? 'profit' : 'loss';
+      $('status').textContent += ` · ${markers.length} 笔${mode === 'price' ? '价格触发' : '定时'}定投`;
+    }
+    function updateMode() {
+      const priceMode = $('mode').value === 'price';
+      $('frequency-wrap').classList.toggle('hidden', priceMode);
+      $('target-wrap').classList.toggle('hidden', !priceMode);
+    }
+    function renderPriceTags() {
+      $('price-tags').innerHTML = priceLevels.map((level, index) => `<span class="price-tag">${Number(level).toLocaleString('en-US')} <button type="button" data-index="${index}" aria-label="删除 ${level}">×</button></span>`).join('');
+      $('price-tags').querySelectorAll('button').forEach(button => button.addEventListener('click', () => {
+        priceLevels.splice(Number(button.dataset.index), 1); renderPriceTags(); calculate();
+      }));
+    }
+    function addPriceLevel() {
+      const level = Number($('target-price').value);
+      if (!level || level <= 0) return alert('请输入有效的触发价格。');
+      if (!priceLevels.includes(level)) priceLevels.push(level);
+      priceLevels.sort((a,b) => b-a); $('target-price').value = ''; renderPriceTags(); calculate();
+    }
+    async function init() { try { await loadCandles(); calculate(); } catch(e) { $('status').textContent=e.message + '，请稍后重试。'; console.error(e); } }
+    $('calculate').addEventListener('click',calculate);
+    $('add-price').addEventListener('click',addPriceLevel);
+    $('target-price').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); addPriceLevel(); } });
+    $('mode').addEventListener('change', () => { updateMode(); calculate(); });
+    renderPriceTags(); updateMode();
+    init(); setInterval(init, 60_000);
+  </script>
+</body>
+</html>
