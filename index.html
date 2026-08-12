@@ -39,9 +39,9 @@
     <h1>₿ 加密货币定投日线</h1>
     <p class="sub">按日线收盘价模拟定投；图中的 <b>B</b> 是每一笔买入。</p>
     <section class="panel controls">
-      <label>市场<select id="market"><option value="crypto" selected>币圈（Binance）</option><option value="us">美股 / 指数</option><option value="kr">韩股 / 指数</option></select></label>
+      <label>市场<select id="market"><option value="crypto" selected>币圈（Hyperliquid）</option><option value="us">美股 / 指数（Hyperliquid）</option><option value="kr">韩股 / 指数（Hyperliquid）</option><option value="cn">A股 / 指数（Hyperliquid）</option></select></label>
       <label id="asset-wrap">币种（输入代码）<input id="asset" list="asset-list" value="BTC" autocomplete="off" placeholder="例如 BTC、ETH、SOL" /><datalist id="asset-list"></datalist></label>
-      <label>每次定投金额（<span id="currency-label">USDT</span>）<input id="amount" type="number" min="1" step="1" value="100" /></label>
+      <label>每次定投金额（<span id="currency-label">USDC</span>）<input id="amount" type="number" min="1" step="1" value="100" /></label>
       <label>开始日期（北京时间）<input id="start" type="date" /></label>
       <label>结束日期（北京时间）<input id="end" type="date" /></label>
       <label>定投方式<select id="mode"><option value="schedule" selected>按时间定投</option><option value="price">按价格定投</option></select></label>
@@ -50,7 +50,7 @@
       <button id="calculate">更新定投计划</button>
     </section>
     <section class="panel">
-      <div class="chart-head"><strong id="chart-title">BTC/USDT · 日线</strong><span class="status" id="status">正在加载行情…</span></div>
+      <div class="chart-head"><strong id="chart-title">BTC/USDC · 日线</strong><span class="status" id="status">正在加载行情…</span></div>
       <div id="chart"></div>
     </section>
     <section class="panel summary">
@@ -59,17 +59,18 @@
       <div class="metric"><span>定投成本（平均买入价）</span><strong id="cost">—</strong></div>
       <div class="metric"><span>收益金额 / 收益率</span><strong id="profit">—</strong></div>
     </section>
-    <p class="note">币圈列出 Binance 可交易的现货 USDT 交易对。美股与韩股提供常用股票和指数；股票日线来自 Yahoo Finance，按当地市场收盘价计算。指数（如标普500、纳斯达克、KOSPI）仅供模拟跟踪，实际购买通常应选择对应 ETF。“按价格定投”可设置多个价格档位。本页面不含交易手续费、滑点、汇率与税费，仅供学习和记录，不构成投资建议。</p>
+    <p class="note">所有市场均只使用 Hyperliquid 公共 API：可用市场会显示在候选列表；若 Hyperliquid 未提供美股、韩股或 A 股对应合约，则不会显示。报价和定投金额统一以 USDC 计。“按价格定投”可设置多个价格档位。本页面不含交易手续费、滑点、汇率与税费，仅供学习和记录，不构成投资建议。</p>
   </main>
   <script>
     const $ = id => document.getElementById(id);
     const marketConfig = {
-      crypto: { currency:'USDT', label:'币种（输入代码）', placeholder:'例如 BTC、ETH、SOL', assets:[] },
-      us: { currency:'USD', label:'美股 / 指数代码', placeholder:'例如 AAPL、NVDA、^GSPC', assets:[['AAPL','苹果'],['NVDA','英伟达'],['MSFT','微软'],['AMZN','亚马逊'],['GOOGL','谷歌'],['META','Meta'],['TSLA','特斯拉'],['SPY','标普500 ETF'],['QQQ','纳斯达克100 ETF'],['DIA','道琼斯 ETF'],['^GSPC','标普500指数'],['^IXIC','纳斯达克综合指数'],['^DJI','道琼斯工业指数'],['^SOX','费城半导体指数']] },
-      kr: { currency:'KRW', label:'韩股 / 指数代码', placeholder:'例如 005930.KS、000660.KS', assets:[['005930.KS','三星电子'],['000660.KS','SK 海力士'],['005380.KS','现代汽车'],['373220.KS','LG 新能源'],['207940.KS','三星生物制剂'],['051910.KS','LG 化学'],['035420.KS','NAVER'],['035720.KS','Kakao'],['^KS11','KOSPI 指数'],['^KQ11','KOSDAQ 指数']] }
+      crypto: { currency:'USDC', label:'合约代码（输入）', placeholder:'例如 BTC、ETH、SOL', candidates:[] },
+      us: { currency:'USDC', label:'美股 / 指数合约', placeholder:'仅显示 Hyperliquid 提供的合约', candidates:['AAPL','NVDA','MSFT','AMZN','GOOGL','META','TSLA','SPY','QQQ','DIA','GSPC','NDX','DJI','SOX'] },
+      kr: { currency:'USDC', label:'韩股 / 指数合约', placeholder:'仅显示 Hyperliquid 提供的合约', candidates:['005930','SAMSUNG','000660','SKHYNIX','005380','HYUNDAI','KOSPI','KOSDAQ'] },
+      cn: { currency:'USDC', label:'A股 / 指数合约', placeholder:'仅显示 Hyperliquid 提供的合约', candidates:['600519','KWEICHOW','000001','PINGAN','300750','CATL','SHCOMP','CSI300','SSE50'] }
     };
     const currency = () => marketConfig[$('market').value].currency;
-    const fmtUsd = n => new Intl.NumberFormat('zh-CN',{style:'currency',currency:currency() === 'USDT' ? 'USD' : currency(),maximumFractionDigits:2}).format(n || 0);
+    const fmtUsd = n => new Intl.NumberFormat('zh-CN',{style:'currency',currency:'USD',maximumFractionDigits:2}).format(n || 0);
     const assetCode = () => $('asset').value.trim().toUpperCase();
     const fmtCoin = n => (n || 0).toFixed(8) + ' ' + assetCode();
     const nowCst = new Date(Date.now()+8*3600e3).toISOString().slice(0,10);
@@ -89,7 +90,6 @@
     let supportedAssets = new Set();
 
     function cstDate(ts) { return new Date((ts + 8*3600)*1000).toISOString().slice(0,10); }
-    function marketDate(ts) { return new Date(ts * 1000).toISOString().slice(0,10); }
     async function requestJson(url) {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 8000);
@@ -104,15 +104,25 @@
       for (const source of urls) try { return await requestJson(source); } catch (e) { console.warn('行情请求失败', source, e); }
       throw new Error('行情服务暂时不可用');
     }
+    async function hlInfo(body) {
+      const response = await fetch('https://api.hyperliquid.xyz/info', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+      if (!response.ok) throw new Error('Hyperliquid 行情服务暂时不可用');
+      return response.json();
+    }
     async function loadAssetList() {
       try {
-        const res = await fetch('https://api.binance.com/api/v3/exchangeInfo');
-        if (!res.ok) throw new Error('币种列表暂时不可用');
-        const data = await res.json();
-        const assets = data.symbols.filter(s => s.quoteAsset === 'USDT' && s.status === 'TRADING' && s.isSpotTradingAllowed).map(s => s.baseAsset).sort();
+        const data = await hlInfo({type:'meta'});
+        const assets = data.universe.map(asset => asset.name).sort();
         supportedAssets = new Set(assets);
-        if ($('market').value === 'crypto') $('asset-list').innerHTML = assets.map(asset => `<option value="${asset}">${asset}/USDT</option>`).join('');
+        renderMarketAssets();
       } catch (e) { console.warn(e); }
+    }
+    function renderMarketAssets() {
+      const market = $('market').value, config = marketConfig[market];
+      const available = market === 'crypto' ? [...supportedAssets] : config.candidates.filter(code => supportedAssets.has(code));
+      $('asset-list').innerHTML = available.map(asset => `<option value="${asset}">${asset}/USDC</option>`).join('');
+      if (market !== 'crypto' && !available.length) $('status').textContent = 'Hyperliquid 暂未提供该市场的可用合约。';
+      return available;
     }
     async function loadCandles() {
       $('status').textContent = '正在更新日线…';
@@ -120,17 +130,13 @@
       $('asset').value = asset;
       const market = $('market').value;
       const config = marketConfig[market];
-      if (market === 'crypto' && supportedAssets.size && !supportedAssets.has(asset)) throw new Error(`${asset} 没有可用的 Binance USDT 现货交易对`);
+      if (supportedAssets.size && !supportedAssets.has(asset)) throw new Error(`${asset} 不在 Hyperliquid 当前可用合约中`);
       $('chart-title').textContent = `${asset}/${config.currency} · 日线`;
       $('coin-label').textContent = `累计 ${asset}`;
-      const url = market === 'crypto'
-        ? `https://api.binance.com/api/v3/klines?symbol=${asset}USDT&interval=1d&limit=1000&timeZone=8`
-        : `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(asset)}?range=5y&interval=1d&events=history&includeAdjustedClose=true`;
-      const rows = await getJson(url);
+      const endTime = Date.now(), startTime = endTime - 1000 * 60 * 60 * 24 * 1000;
+      const rows = await hlInfo({type:'candleSnapshot', req:{coin:asset, interval:'1d', startTime, endTime}});
       loadedAsset = asset;
-      candleData = market === 'crypto'
-        ? rows.map(r => ({ time:cstDate(r[0]/1000), open:+r[1], high:+r[2], low:+r[3], close:+r[4] }))
-        : rows.chart.result[0].timestamp.map((timestamp, i) => ({ time:marketDate(timestamp), open:+rows.chart.result[0].indicators.quote[0].open[i], high:+rows.chart.result[0].indicators.quote[0].high[i], low:+rows.chart.result[0].indicators.quote[0].low[i], close:+rows.chart.result[0].indicators.quote[0].close[i] })).filter(d => Number.isFinite(d.open) && Number.isFinite(d.high) && Number.isFinite(d.low) && Number.isFinite(d.close));
+      candleData = rows.map(row => ({ time:cstDate(row.t / 1000), open:+row.o, high:+row.h, low:+row.l, close:+row.c }));
       if (!candleData.length) throw new Error(`${asset} 没有可用的日线数据`);
       candles.setData(candleData);
       chart.timeScale().fitContent();
@@ -179,11 +185,10 @@
       $('asset-wrap').firstChild.textContent = config.label;
       $('asset').placeholder = config.placeholder;
       $('currency-label').textContent = config.currency;
-      $('asset-list').innerHTML = config.assets.map(([code, name]) => `<option value="${code}">${name}</option>`).join('');
-      $('asset').value = $('market').value === 'crypto' ? 'BTC' : config.assets[0][0];
+      const available = renderMarketAssets();
+      $('asset').value = $('market').value === 'crypto' ? 'BTC' : (available[0] || '');
       priceLevels = []; renderPriceTags();
-      if ($('market').value === 'crypto') loadAssetList();
-      init();
+      if ($('asset').value) init();
     }
     function renderPriceTags() {
       $('price-tags').innerHTML = priceLevels.map((level, index) => `<span class="price-tag">${Number(level).toLocaleString('en-US')} <button type="button" data-index="${index}" aria-label="删除 ${level}">×</button></span>`).join('');
