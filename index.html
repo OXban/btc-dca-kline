@@ -37,10 +37,11 @@
 <body>
   <main>
     <h1>₿ 加密货币定投日线</h1>
-    <p class="sub">按北京时间（UTC+8）每日收盘价模拟定投；图中的 <b>B</b> 是每一笔买入。</p>
+    <p class="sub">按日线收盘价模拟定投；图中的 <b>B</b> 是每一笔买入。</p>
     <section class="panel controls">
-      <label>币种<select id="asset"><option value="BTC" selected>BTC（比特币）</option><option value="ETH">ETH（以太坊）</option><option value="BNB">BNB（币安币）</option></select></label>
-      <label>每次定投金额（USDT）<input id="amount" type="number" min="1" step="1" value="100" /></label>
+      <label>市场<select id="market"><option value="crypto" selected>币圈（Binance）</option><option value="us">美股 / 指数</option><option value="kr">韩股 / 指数</option></select></label>
+      <label id="asset-wrap">币种（输入代码）<input id="asset" list="asset-list" value="BTC" autocomplete="off" placeholder="例如 BTC、ETH、SOL" /><datalist id="asset-list"></datalist></label>
+      <label>每次定投金额（<span id="currency-label">USDT</span>）<input id="amount" type="number" min="1" step="1" value="100" /></label>
       <label>开始日期（北京时间）<input id="start" type="date" /></label>
       <label>结束日期（北京时间）<input id="end" type="date" /></label>
       <label>定投方式<select id="mode"><option value="schedule" selected>按时间定投</option><option value="price">按价格定投</option></select></label>
@@ -58,12 +59,19 @@
       <div class="metric"><span>定投成本（平均买入价）</span><strong id="cost">—</strong></div>
       <div class="metric"><span>收益金额 / 收益率</span><strong id="profit">—</strong></div>
     </section>
-    <p class="note">“按价格定投”可设置多个价格档位。每个档位仅在开始至结束日期内、第一次出现北京时间日线收盘价低于或等于该档位时买入一次。数据来源：Binance 现货 USDT 交易对。日线以 API 的 <code>timeZone=8</code> 参数对齐 UTC+8；未包含交易手续费、滑点或税费。本页面仅供学习和记录，不构成投资建议。</p>
+    <p class="note">币圈列出 Binance 可交易的现货 USDT 交易对。美股与韩股提供常用股票和指数；股票日线来自 Yahoo Finance，按当地市场收盘价计算。指数（如标普500、纳斯达克、KOSPI）仅供模拟跟踪，实际购买通常应选择对应 ETF。“按价格定投”可设置多个价格档位。本页面不含交易手续费、滑点、汇率与税费，仅供学习和记录，不构成投资建议。</p>
   </main>
   <script>
     const $ = id => document.getElementById(id);
-    const fmtUsd = n => new Intl.NumberFormat('zh-CN',{style:'currency',currency:'USD',maximumFractionDigits:2}).format(n || 0);
-    const fmtCoin = n => (n || 0).toFixed(8) + ' ' + $('asset').value;
+    const marketConfig = {
+      crypto: { currency:'USDT', label:'币种（输入代码）', placeholder:'例如 BTC、ETH、SOL', assets:[] },
+      us: { currency:'USD', label:'美股 / 指数代码', placeholder:'例如 AAPL、NVDA、^GSPC', assets:[['AAPL','苹果'],['NVDA','英伟达'],['MSFT','微软'],['AMZN','亚马逊'],['GOOGL','谷歌'],['META','Meta'],['TSLA','特斯拉'],['SPY','标普500 ETF'],['QQQ','纳斯达克100 ETF'],['DIA','道琼斯 ETF'],['^GSPC','标普500指数'],['^IXIC','纳斯达克综合指数'],['^DJI','道琼斯工业指数'],['^SOX','费城半导体指数']] },
+      kr: { currency:'KRW', label:'韩股 / 指数代码', placeholder:'例如 005930.KS、000660.KS', assets:[['005930.KS','三星电子'],['000660.KS','SK 海力士'],['005380.KS','现代汽车'],['373220.KS','LG 新能源'],['207940.KS','三星生物制剂'],['051910.KS','LG 化学'],['035420.KS','NAVER'],['035720.KS','Kakao'],['^KS11','KOSPI 指数'],['^KQ11','KOSDAQ 指数']] }
+    };
+    const currency = () => marketConfig[$('market').value].currency;
+    const fmtUsd = n => new Intl.NumberFormat('zh-CN',{style:'currency',currency:currency() === 'USDT' ? 'USD' : currency(),maximumFractionDigits:2}).format(n || 0);
+    const assetCode = () => $('asset').value.trim().toUpperCase();
+    const fmtCoin = n => (n || 0).toFixed(8) + ' ' + assetCode();
     const nowCst = new Date(Date.now()+8*3600e3).toISOString().slice(0,10);
     const defaultStart = new Date(Date.now()-365*864e5+8*3600e3).toISOString().slice(0,10);
     $('start').value = defaultStart;
@@ -75,21 +83,43 @@
     });
     const candles = chart.addSeries(LightweightCharts.CandlestickSeries,{upColor:'#2fc88e',downColor:'#f05c6c',borderUpColor:'#2fc88e',borderDownColor:'#f05c6c',wickUpColor:'#2fc88e',wickDownColor:'#f05c6c'});
     let candleData = [];
+    let loadedAsset = 'BTC';
     const buyMarkers = LightweightCharts.createSeriesMarkers(candles, []);
     let priceLevels = [80000];
-    const assetDefaults = { BTC:80000, ETH:3000, BNB:700 };
+    let supportedAssets = new Set();
 
     function cstDate(ts) { return new Date((ts + 8*3600)*1000).toISOString().slice(0,10); }
+    function marketDate(ts) { return new Date(ts * 1000).toISOString().slice(0,10); }
+    async function loadAssetList() {
+      try {
+        const res = await fetch('https://api.binance.com/api/v3/exchangeInfo');
+        if (!res.ok) throw new Error('币种列表暂时不可用');
+        const data = await res.json();
+        const assets = data.symbols.filter(s => s.quoteAsset === 'USDT' && s.status === 'TRADING' && s.isSpotTradingAllowed).map(s => s.baseAsset).sort();
+        supportedAssets = new Set(assets);
+        if ($('market').value === 'crypto') $('asset-list').innerHTML = assets.map(asset => `<option value="${asset}">${asset}/USDT</option>`).join('');
+      } catch (e) { console.warn(e); }
+    }
     async function loadCandles() {
       $('status').textContent = '正在更新日线…';
-      const asset = $('asset').value;
-      $('chart-title').textContent = `${asset}/USDT · 日线`;
+      const asset = assetCode();
+      $('asset').value = asset;
+      const market = $('market').value;
+      const config = marketConfig[market];
+      if (market === 'crypto' && supportedAssets.size && !supportedAssets.has(asset)) throw new Error(`${asset} 没有可用的 Binance USDT 现货交易对`);
+      $('chart-title').textContent = `${asset}/${config.currency} · 日线`;
       $('coin-label').textContent = `累计 ${asset}`;
-      const url = `https://api.binance.com/api/v3/klines?symbol=${asset}USDT&interval=1d&limit=1000&timeZone=8`;
+      const url = market === 'crypto'
+        ? `https://api.binance.com/api/v3/klines?symbol=${asset}USDT&interval=1d&limit=1000&timeZone=8`
+        : `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(asset)}?range=5y&interval=1d&events=history&includeAdjustedClose=true`;
       const res = await fetch(url);
       if (!res.ok) throw new Error('行情服务暂时不可用');
       const rows = await res.json();
-      candleData = rows.map(r => ({ time:cstDate(r[0]/1000), open:+r[1], high:+r[2], low:+r[3], close:+r[4] }));
+      loadedAsset = asset;
+      candleData = market === 'crypto'
+        ? rows.map(r => ({ time:cstDate(r[0]/1000), open:+r[1], high:+r[2], low:+r[3], close:+r[4] }))
+        : rows.chart.result[0].timestamp.map((timestamp, i) => ({ time:marketDate(timestamp), open:+rows.chart.result[0].indicators.quote[0].open[i], high:+rows.chart.result[0].indicators.quote[0].high[i], low:+rows.chart.result[0].indicators.quote[0].low[i], close:+rows.chart.result[0].indicators.quote[0].close[i] })).filter(d => Number.isFinite(d.open) && Number.isFinite(d.high) && Number.isFinite(d.low) && Number.isFinite(d.close));
+      if (!candleData.length) throw new Error(`${asset} 没有可用的日线数据`);
       candles.setData(candleData);
       chart.timeScale().fitContent();
       $('status').textContent = `已更新 · ${new Date().toLocaleTimeString('zh-CN',{timeZone:'Asia/Shanghai'})}（北京时间）`;
@@ -132,6 +162,17 @@
       $('frequency-wrap').classList.toggle('hidden', priceMode);
       $('target-wrap').classList.toggle('hidden', !priceMode);
     }
+    function setMarket() {
+      const config = marketConfig[$('market').value];
+      $('asset-wrap').firstChild.textContent = config.label;
+      $('asset').placeholder = config.placeholder;
+      $('currency-label').textContent = config.currency;
+      $('asset-list').innerHTML = config.assets.map(([code, name]) => `<option value="${code}">${name}</option>`).join('');
+      $('asset').value = $('market').value === 'crypto' ? 'BTC' : config.assets[0][0];
+      priceLevels = []; renderPriceTags();
+      if ($('market').value === 'crypto') loadAssetList();
+      init();
+    }
     function renderPriceTags() {
       $('price-tags').innerHTML = priceLevels.map((level, index) => `<span class="price-tag">${Number(level).toLocaleString('en-US')} <button type="button" data-index="${index}" aria-label="删除 ${level}">×</button></span>`).join('');
       $('price-tags').querySelectorAll('button').forEach(button => button.addEventListener('click', () => {
@@ -145,13 +186,15 @@
       priceLevels.sort((a,b) => b-a); $('target-price').value = ''; renderPriceTags(); calculate();
     }
     async function init() { try { await loadCandles(); calculate(); } catch(e) { $('status').textContent=e.message + '，请稍后重试。'; console.error(e); } }
-    $('calculate').addEventListener('click',calculate);
+    $('calculate').addEventListener('click', () => assetCode() === loadedAsset ? calculate() : init());
     $('add-price').addEventListener('click',addPriceLevel);
     $('target-price').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); addPriceLevel(); } });
     $('mode').addEventListener('change', () => { updateMode(); calculate(); });
-    $('asset').addEventListener('change', () => { priceLevels = [assetDefaults[$('asset').value]]; renderPriceTags(); init(); });
+    $('asset').addEventListener('change', () => { priceLevels = []; renderPriceTags(); init(); });
+    $('asset').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); priceLevels = []; renderPriceTags(); init(); } });
+    $('market').addEventListener('change', setMarket);
     renderPriceTags(); updateMode();
-    init(); setInterval(init, 60_000);
+    loadAssetList().then(init); setInterval(init, 60_000);
   </script>
 </body>
 </html>
