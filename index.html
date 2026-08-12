@@ -111,10 +111,11 @@
       return response.json();
     }
     function registerAsset(name, dex = '') {
-      const raw = String(name).toUpperCase();
+      const source = String(name);
+      const raw = source.toUpperCase();
       const base = raw.includes(':') ? raw.split(':').at(-1) : raw;
       // HIP-3 日线接口要求传入 DEX:合约；主市场则直接传合约代码。
-      const coin = dex && !raw.startsWith(`${dex.toUpperCase()}:`) ? `${dex.toUpperCase()}:${raw}` : raw;
+      const coin = dex && !source.toLowerCase().startsWith(`${dex.toLowerCase()}:`) ? `${dex}:${source}` : source;
       const item = { coin, symbol:base, dex };
       [raw, coin, base, `${base}-USDC`, `${base}/USDC`].forEach(alias => assetRegistry.set(alias, item));
       supportedAssets.add(coin);
@@ -141,7 +142,7 @@
           (meta.universe || []).forEach(asset => registerAsset(asset.name, name));
         }));
         // API 清单响应偶发延迟时，保留已验证的 MU 映射，供用户立即使用。
-        if (!resolveAsset('MU')) registerAsset('MU', 'xyz');
+        registerAsset('MU', 'xyz');
         renderMarketAssets();
       } catch (e) { console.warn(e); }
     }
