@@ -131,8 +131,9 @@
         main.universe.forEach(asset => registerAsset(asset.name));
         // perpDexs 列出全部 HIP-3 Builder DEX；每个 DEX 需要单独读取 meta。
         const dexes = await hlInfo({type:'perpDexs'}).catch(() => []);
-        // XYZ 是当前承载 MU 等股票合约的 HIP-3 DEX。即使清单接口暂时异常，MU 也可用。
-        const names = new Set(['xyz']);
+        // 已验证的 HIP-3 市场兜底：MU 在 xyz，QQQ 在 mkts。
+        // 即使合约清单接口暂时异常，这两个合约仍可立即使用。
+        const names = new Set(['xyz', 'mkts']);
         (Array.isArray(dexes) ? dexes : []).filter(Boolean).forEach(dex => {
           const name = typeof dex === 'string' ? dex : dex.name;
           if (name) names.add(name);
@@ -141,8 +142,9 @@
           const meta = await hlInfo({type:'meta', dex:name});
           (meta.universe || []).forEach(asset => registerAsset(asset.name, name));
         }));
-        // API 清单响应偶发延迟时，保留已验证的 MU 映射，供用户立即使用。
+        // API 清单响应偶发延迟时，保留已验证的常用合约映射，供用户立即使用。
         registerAsset('MU', 'xyz');
+        registerAsset('QQQ', 'mkts');
         renderMarketAssets();
       } catch (e) { console.warn(e); }
     }
