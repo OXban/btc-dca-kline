@@ -65,7 +65,7 @@
     const $ = id => document.getElementById(id);
     const marketConfig = {
       crypto: { currency:'USDC', label:'合约代码（输入）', placeholder:'例如 BTC、ETH、SOL', candidates:[] },
-      us: { currency:'USDC', label:'美股 / 指数合约', placeholder:'仅显示 Hyperliquid 提供的合约', candidates:['AAPL','NVDA','MSFT','AMZN','GOOGL','META','TSLA','SPY','QQQ','DIA','GSPC','NDX','DJI','SOX'] },
+      us: { currency:'USDC', label:'美股 / 指数合约', placeholder:'仅显示 Hyperliquid 提供的合约', candidates:['MU','AAPL','NVDA','MSFT','AMZN','GOOGL','META','TSLA','SPY','QQQ','DIA','GSPC','NDX','DJI','SOX'] },
       kr: { currency:'USDC', label:'韩股 / 指数合约', placeholder:'仅显示 Hyperliquid 提供的合约', candidates:['005930','SAMSUNG','000660','SKHYNIX','005380','HYUNDAI','KOSPI','KOSDAQ'] },
       cn: { currency:'USDC', label:'A股 / 指数合约', placeholder:'仅显示 Hyperliquid 提供的合约', candidates:['600519','KWEICHOW','000001','PINGAN','300750','CATL','SHCOMP','CSI300','SSE50'] }
     };
@@ -88,6 +88,7 @@
     const buyMarkers = LightweightCharts.createSeriesMarkers(candles, []);
     let priceLevels = [80000];
     let supportedAssets = new Set();
+    let assetRegistry = new Map();
 
     function cstDate(ts) { return new Date((ts + 8*3600)*1000).toISOString().slice(0,10); }
     async function requestJson(url) {
@@ -109,33 +110,57 @@
       if (!response.ok) throw new Error('Hyperliquid 行情服务暂时不可用');
       return response.json();
     }
+    function registerAsset(name, dex = '') {
+      const raw = String(name).toUpperCase();
+      const base = raw.includes(':') ? raw.split(':').at(-1) : raw;
+      // HIP-3 日线接口要求传入 DEX:合约；主市场则直接传合约代码。
+      const coin = dex && !raw.startsWith(`${dex.toUpperCase()}:`) ? `${dex.toUpperCase()}:${raw}` : raw;
+      const item = { coin, symbol:base, dex };
+      [raw, coin, base, `${base}-USDC`, `${base}/USDC`].forEach(alias => assetRegistry.set(alias, item));
+      supportedAssets.add(coin);
+    }
+    function resolveAsset(value) {
+      const raw = value.trim().toUpperCase();
+      return assetRegistry.get(raw) || assetRegistry.get(raw.replace(/[-/]USDC$/, ''));
+    }
     async function loadAssetList() {
       try {
-        const data = await hlInfo({type:'meta'});
-        const assets = data.universe.map(asset => asset.name).sort();
-        supportedAssets = new Set(assets);
+        assetRegistry = new Map(); supportedAssets = new Set();
+        const main = await hlInfo({type:'meta'});
+        main.universe.forEach(asset => registerAsset(asset.name));
+        // perpDexs 列出全部 HIP-3 Builder DEX；每个 DEX 需要单独读取 meta。
+        const dexes = await hlInfo({type:'perpDexs'});
+        await Promise.all((Array.isArray(dexes) ? dexes : []).filter(Boolean).map(async dex => {
+          const name = typeof dex === 'string' ? dex : dex.name;
+          if (!name) return;
+          const meta = await hlInfo({type:'meta', dex:name});
+          (meta.universe || []).forEach(asset => registerAsset(asset.name, name));
+        }));
         renderMarketAssets();
       } catch (e) { console.warn(e); }
     }
     function renderMarketAssets() {
       const market = $('market').value, config = marketConfig[market];
-      const available = market === 'crypto' ? [...supportedAssets] : config.candidates.filter(code => supportedAssets.has(code));
+      const all = [...new Set([...assetRegistry.values()].map(item => item.symbol))].sort();
+      const available = market === 'crypto' ? all : config.candidates.filter(code => resolveAsset(code));
       $('asset-list').innerHTML = available.map(asset => `<option value="${asset}">${asset}/USDC</option>`).join('');
       if (market !== 'crypto' && !available.length) $('status').textContent = 'Hyperliquid 暂未提供该市场的可用合约。';
       return available;
     }
     async function loadCandles() {
       $('status').textContent = '正在更新日线…';
-      const asset = assetCode();
-      $('asset').value = asset;
+      const requested = assetCode();
+      const item = resolveAsset(requested);
       const market = $('market').value;
       const config = marketConfig[market];
-      if (supportedAssets.size && !supportedAssets.has(asset)) throw new Error(`${asset} 不在 Hyperliquid 当前可用合约中`);
-      $('chart-title').textContent = `${asset}/${config.currency} · 日线`;
-      $('coin-label').textContent = `累计 ${asset}`;
+      if (supportedAssets.size && !item) throw new Error(`${requested} 不在 Hyperliquid 当前可用合约中`);
+      if (!item) throw new Error('正在读取 Hyperliquid 合约列表，请稍后重试');
+      $('asset').value = item.symbol;
+      $('chart-title').textContent = `${item.symbol}/${config.currency} · 日线`;
+      $('coin-label').textContent = `累计 ${item.symbol}`;
       const endTime = Date.now(), startTime = endTime - 1000 * 60 * 60 * 24 * 1000;
-      const rows = await hlInfo({type:'candleSnapshot', req:{coin:asset, interval:'1d', startTime, endTime}});
-      loadedAsset = asset;
+      const rows = await hlInfo({type:'candleSnapshot', req:{coin:item.coin, interval:'1d', startTime, endTime}});
+      loadedAsset = item.coin;
       candleData = rows.map(row => ({ time:cstDate(row.t / 1000), open:+row.o, high:+row.h, low:+row.l, close:+row.c }));
       if (!candleData.length) throw new Error(`${asset} 没有可用的日线数据`);
       candles.setData(candleData);
@@ -203,7 +228,7 @@
       priceLevels.sort((a,b) => b-a); $('target-price').value = ''; renderPriceTags(); calculate();
     }
     async function init() { try { await loadCandles(); calculate(); } catch(e) { $('status').textContent=e.message + '，请稍后重试。'; console.error(e); } }
-    $('calculate').addEventListener('click', () => assetCode() === loadedAsset ? calculate() : init());
+    $('calculate').addEventListener('click', () => resolveAsset(assetCode())?.coin === loadedAsset ? calculate() : init());
     $('add-price').addEventListener('click',addPriceLevel);
     $('target-price').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); addPriceLevel(); } });
     $('mode').addEventListener('change', () => { updateMode(); calculate(); });
