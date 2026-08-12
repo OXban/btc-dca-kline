@@ -90,17 +90,19 @@
 
     function cstDate(ts) { return new Date((ts + 8*3600)*1000).toISOString().slice(0,10); }
     function marketDate(ts) { return new Date(ts * 1000).toISOString().slice(0,10); }
-    async function getJson(url) {
+    async function requestJson(url) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 8000);
       try {
-        const response = await fetch(url);
+        const response = await fetch(url, {signal:controller.signal});
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         return await response.json();
-      } catch (directError) {
-        const proxy = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
-        const response = await fetch(proxy);
-        if (!response.ok) throw new Error('行情服务暂时不可用');
-        return await response.json();
-      }
+      } finally { clearTimeout(timeout); }
+    }
+    async function getJson(url) {
+      const urls = [url, `https://corsproxy.io/?url=${encodeURIComponent(url)}`, `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`];
+      for (const source of urls) try { return await requestJson(source); } catch (e) { console.warn('行情请求失败', source, e); }
+      throw new Error('行情服务暂时不可用');
     }
     async function loadAssetList() {
       try {
