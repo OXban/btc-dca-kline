@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>加密货币定投日线</title>
+  <title>全球资产定投日线</title>
   <script src="https://unpkg.com/lightweight-charts@5.0.8/dist/lightweight-charts.standalone.production.js"></script>
   <style>
     :root { color-scheme: dark; --bg:#0b1020; --card:#131b31; --line:#263150; --text:#eff4ff; --muted:#9cabc9; --accent:#f6a623; --up:#2fc88e; --down:#f05c6c; }
@@ -36,10 +36,10 @@
 </head>
 <body>
   <main>
-    <h1>₿ 加密货币定投日线</h1>
+    <h1>全球资产定投日线</h1>
     <p class="sub">按日线收盘价模拟定投；图中的 <b>B</b> 是每一笔买入。</p>
     <section class="panel controls">
-      <label>市场<select id="market"><option value="crypto" selected>币圈（Hyperliquid）</option><option value="us">美股 / 指数（Hyperliquid）</option><option value="kr">韩股 / 指数（Hyperliquid）</option><option value="cn">A股 / 指数（Hyperliquid）</option></select></label>
+      <label>市场<select id="market"><option value="crypto" selected>币圈</option><option value="us">美股 / 指数</option><option value="kr">韩股 / 指数</option><option value="cn">A股 / 指数</option></select></label>
       <label id="asset-wrap">币种（输入代码）<input id="asset" list="asset-list" value="BTC" autocomplete="off" placeholder="例如 BTC、ETH、SOL" /><datalist id="asset-list"></datalist></label>
       <label>每次定投金额（<span id="currency-label">USDC</span>）<input id="amount" type="number" min="1" step="1" value="100" /></label>
       <label>开始日期（北京时间）<input id="start" type="date" /></label>
